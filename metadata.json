@@ -1,0 +1,5 @@
+{
+  "name": "Vault - High Yield Savings",
+  "description": "A dark-mode financial application that allows users to save money and earn 2% interest, featuring a stock-like interface.",
+  "requestFramePermissions": []
+}

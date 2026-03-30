@@ -1,0 +1,101 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {userId}
+    // Fields:
+    //   - uid: string (required) - The user's unique ID.
+    //   - email: string (required) - The user's email address.
+    //   - name: string (required) - The user's display name.
+    //   - role: string (required, 'user' or 'admin') - The user's role.
+    //   - balance: number (required) - The user's current balance.
+    //   - costBasis: number (required) - The user's total deposits minus withdrawals.
+    //   - lastUpdate: string (required, ISO 8601 date string) - The last time the balance was updated.
+    //
+    // Collection: transactions
+    // Document ID: {transactionId}
+    // Fields:
+    //   - uid: string (required) - The ID of the user who made the transaction.
+    //   - type: string (required, 'deposit' or 'withdrawal') - The type of transaction.
+    //   - amount: number (required) - The amount of the transaction.
+    //   - date: string (required, ISO 8601 date string) - The date and time of the transaction.
+    //
+    // ===============================================================
+
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.uid;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+          (request.auth.token.email == "gedeonizabikora37@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function uidUnchanged() {
+      return !('uid' in request.resource.data) || request.resource.data.uid == request.auth.uid;
+    }
+
+    function uidNotModified() {
+      return !('uid' in request.resource.data) || request.resource.data.uid == resource.data.uid;
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidDateString(dateStr) {
+      return dateStr is string && dateStr.matches("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}.*Z?$");
+    }
+
+    function isValidUser(data) {
+      return hasOnlyAllowedFields(['uid', 'email', 'name', 'role', 'balance', 'costBasis', 'lastUpdate']) &&
+             data.uid is string && data.uid.size() > 0 && data.uid.size() < 100 &&
+             data.email is string && isValidEmail(data.email) && data.email.size() < 100 &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.role in ['user', 'admin'] &&
+             data.balance is number && data.balance >= 0 &&
+             data.costBasis is number &&
+             isValidDateString(data.lastUpdate);
+    }
+
+    function isValidTransaction(data) {
+      return hasOnlyAllowedFields(['uid', 'type', 'amount', 'date']) &&
+             data.uid is string && data.uid.size() > 0 && data.uid.size() < 100 &&
+             data.type in ['deposit', 'withdrawal'] &&
+             data.amount is number && data.amount > 0 &&
+             isValidDateString(data.date);
+    }
+
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isAuthenticated() && isValidUser(request.resource.data) && uidUnchanged() && isOwner(userId) && ((request.resource.data.role == 'user') || isAdmin());
+      allow update: if isAuthenticated() && isValidUser(request.resource.data) && uidNotModified() && ((isOwner(userId) && request.resource.data.role == resource.data.role) || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    match /transactions/{transactionId} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAuthenticated() && isValidTransaction(request.resource.data) && uidUnchanged() && isOwner(request.resource.data.uid);
+      allow update: if false; // Transactions should be immutable
+      allow delete: if isAdmin();
+    }
+  }
+}
